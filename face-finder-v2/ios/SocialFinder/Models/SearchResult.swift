@@ -95,7 +95,7 @@ class FaceSearchService: ObservableObject {
     }
 
     func search(image: UIImage) async throws -> SearchResponse {
-        guard let data = image.jpegData(compressionQuality: 0.85) else { throw AppError.noImage }
+        guard let imageData = image.jpegData(compressionQuality: 0.85) else { throw AppError.noImage }
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: URL(string: "\(serverURL)/api/search")!)
         req.httpMethod = "POST"; req.timeoutInterval = 120
@@ -105,17 +105,17 @@ class FaceSearchService: ObservableObject {
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"image\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
-        body.append(data)
+        body.append(imageData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (respData, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw AppError.invalidResponse }
         if http.statusCode == 413 { throw AppError.server("Image too large") }
         if http.statusCode != 200 {
-            if let e = try? JSONDecoder().decode(APIError.self, from: data) { throw AppError.server(e.error) }
+            if let e = try? JSONDecoder().decode(APIError.self, from: respData) { throw AppError.server(e.error) }
             throw AppError.server("HTTP \(http.statusCode)")
         }
-        return try JSONDecoder().decode(SearchResponse.self, from: data)
+        return try JSONDecoder().decode(SearchResponse.self, from: respData)
     }
 }
