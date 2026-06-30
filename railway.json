@@ -1,0 +1,10 @@
+{
+  "build": {
+    "builder": "nixpacks",
+    "buildCommand": "cd face-finder-v2/backend && npm install"
+  },
+  "deploy": {
+    "startCommand": "cd face-finder-v2/backend && node server.js",
+    "healthcheckPath": "/api/health"
+  }
+}
