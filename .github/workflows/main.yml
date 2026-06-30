@@ -1,0 +1,34 @@
+name: Build FaceFinder IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: |
+          cd ios
+          xcodegen generate --spec project.yml
+      - name: Build archive
+        run: |
+          cd ios
+          xcodebuild archive -project FaceFinder.xcodeproj -scheme FaceFinder -configuration Release -archivePath build/FaceFinder.xcarchive CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+      - name: Create IPA
+        run: |
+          cd ios
+          mkdir -p build/Payload
+          cp -r "build/FaceFinder.xcarchive/Products/Applications/FaceFinder.app" "build/Payload/FaceFinder.app"
+          cd build
+          zip -r FaceFinder.ipa Payload/
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaceFinder-IPA
+          path: ios/build/FaceFinder.ipa
