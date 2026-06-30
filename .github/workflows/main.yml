@@ -14,15 +14,15 @@ jobs:
         run: brew install xcodegen
       - name: Generate Xcode project
         run: |
-          cd ios
+          cd face-finder/ios
           xcodegen generate --spec project.yml
       - name: Build archive
         run: |
-          cd ios
+          cd face-finder/ios
           xcodebuild archive -project FaceFinder.xcodeproj -scheme FaceFinder -configuration Release -archivePath build/FaceFinder.xcarchive CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
       - name: Create IPA
         run: |
-          cd ios
+          cd face-finder/ios
           mkdir -p build/Payload
           cp -r "build/FaceFinder.xcarchive/Products/Applications/FaceFinder.app" "build/Payload/FaceFinder.app"
           cd build
@@ -31,4 +31,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FaceFinder-IPA
-          path: ios/build/FaceFinder.ipa
+          path: face-finder/ios/build/FaceFinder.ipa
