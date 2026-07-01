@@ -5,68 +5,82 @@ struct ResultsView: View {
     var onReset: () -> Void
 
     @State private var selectedTab = 0
-    @State private var animate = false
+    @State private var cardOffsets: [CGFloat] = []
+    @State private var cardOpacities: [Double] = []
+    @State private var glow = false
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            bgGradient.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Header
-                HStack {
-                    Text("Results").font(.title.bold()).foregroundColor(.white)
-                    Spacer()
-                    Text("\(result.totalMatches) matches").font(.caption).foregroundColor(.white.opacity(0.4))
-                    Button(action: onReset) {
-                        Image(systemName: "xmark.circle.fill").font(.title2).foregroundColor(.white.opacity(0.4))
-                    }
-                }
-                .padding(.horizontal, 20).padding(.top, 56).padding(.bottom, 8)
-
-                // Stats bar
-                HStack(spacing: 0) {
-                    stat("\(result.socialProfiles.count)", "Social", .green)
-                    Divider().frame(height: 24).background(.white.opacity(0.08))
-                    stat("\(result.criminalRecords.count)", "Records", .red)
-                    Divider().frame(height: 24).background(.white.opacity(0.08))
-                    stat("\(result.otherMatches.count)", "Web", .blue)
-                    Divider().frame(height: 24).background(.white.opacity(0.08))
-                    stat("\(result.totalMatches)", "Total", .orange)
-                }
-                .padding(12).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 20).padding(.bottom, 12)
-
-                // Tabs
-                HStack(spacing: 0) {
-                    tabBtn("Social", icon: "person.2.fill", tab: 0)
-                    tabBtn("Criminal", icon: "exclamationmark.shield.fill", tab: 1)
-                    tabBtn("Web", icon: "globe", tab: 2)
-                }
-                .padding(.horizontal, 20).padding(.bottom, 8)
-
-                // Content
-                TabView(selection: $selectedTab) {
-                    socialTab.tag(0)
-                    criminalTab.tag(1)
-                    webTab.tag(2)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
+                header
+                statsBar
+                tabs
+                content
             }
         }
-        .onAppear { animate = true }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { glow.toggle() }
+            animateCards()
+        }
     }
 
-    private func stat(_ count: String, _ label: String, _ color: Color) -> some View {
+    private var bgGradient: some View {
+        LinearGradient(colors: [
+            Color(red: 0.05, green: 0.02, blue: 0.15),
+            Color(red: 0.12, green: 0.02, blue: 0.22),
+            Color(red: 0.02, green: 0.04, blue: 0.12),
+        ], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Results").font(.title.bold()).foregroundColor(.white)
+            Spacer()
+            Text("\(result.totalMatches) matches").font(.caption).foregroundColor(.white.opacity(0.4))
+            Button(action: onReset) {
+                Image(systemName: "xmark.circle.fill").font(.title2).foregroundColor(.white.opacity(0.4))
+            }
+        }
+        .padding(.horizontal, 20).padding(.top, 56).padding(.bottom, 8)
+    }
+
+    private var statsBar: some View {
+        HStack(spacing: 0) {
+            statItem(count: result.socialProfiles.count, label: "Social", color: .green, icon: "person.2.fill")
+            Divider().frame(height: 24).background(.white.opacity(0.08))
+            statItem(count: result.criminalRecords.count, label: "Records", color: .red, icon: "exclamationmark.shield.fill")
+            Divider().frame(height: 24).background(.white.opacity(0.08))
+            statItem(count: result.otherMatches.count, label: "Web", color: .blue, icon: "globe")
+            Divider().frame(height: 24).background(.white.opacity(0.08))
+            statItem(count: result.totalMatches, label: "Total", color: .orange, icon: "number")
+        }
+        .padding(12).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.06), lineWidth: 1))
+        .padding(.horizontal, 20).padding(.bottom, 12)
+    }
+
+    private func statItem(count: Int, label: String, color: Color, icon: String) -> some View {
         VStack(spacing: 2) {
-            Text(count).font(.title3.bold()).foregroundColor(color)
+            Text("\(count)").font(.title3.bold()).foregroundColor(color)
             Text(label).font(.caption2).foregroundColor(.white.opacity(0.4))
         }
         .frame(maxWidth: .infinity)
     }
 
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            tabBtn("Social", icon: "person.2.fill", tab: 0)
+            tabBtn("Criminal", icon: "exclamationmark.shield.fill", tab: 1)
+            tabBtn("Web", icon: "globe", tab: 2)
+        }
+        .padding(.horizontal, 20).padding(.bottom, 8)
+    }
+
     private func tabBtn(_ label: String, icon: String, tab: Int) -> some View {
         Button {
-            withAnimation(.spring) { selectedTab = tab }
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { selectedTab = tab }
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: icon).font(.footnote)
@@ -75,10 +89,23 @@ struct ResultsView: View {
             .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.3))
             .frame(maxWidth: .infinity).padding(.vertical, 8)
             .background(selectedTab == tab ? .white.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(selectedTab == tab ? .white.opacity(0.15) : .clear, lineWidth: 1)
+            )
         }
     }
 
-    // === SOCIAL TAB ===
+    @ViewBuilder
+    private var content: some View {
+        TabView(selection: $selectedTab) {
+            socialTab.tag(0)
+            criminalTab.tag(1)
+            webTab.tag(2)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
     private var socialTab: some View {
         ScrollView {
             if result.socialProfiles.isEmpty {
@@ -86,8 +113,7 @@ struct ResultsView: View {
             } else {
                 LazyVStack(spacing: 6) {
                     ForEach(Array(result.socialProfiles.enumerated()), id: \.element.id) { i, p in
-                        socialRow(p).offset(y: animate ? 0 : 20).opacity(animate ? 1 : 0)
-                            .animation(.spring(response: 0.35, dampingFraction: 0.85).delay(Double(i) * 0.04), value: animate)
+                        socialCard(p, index: i)
                     }
                 }
                 .padding(.horizontal, 20).padding(.bottom, 40)
@@ -95,16 +121,25 @@ struct ResultsView: View {
         }
     }
 
-    private func socialRow(_ p: SocialProfile) -> some View {
-        Link(destination: p.platformURL ?? URL(string: "https://\(p.platform.lowercased())")!) {
-            HStack(spacing: 12) {
-                Circle().fill(Color(hex: p.color).opacity(0.2)).frame(width: 40, height: 40)
-                    .overlay(Image(systemName: sfIcon(p.platform)).foregroundColor(Color(hex: p.color)).font(.footnote))
+    private func socialCard(_ p: SocialProfile, index: Int) -> some View {
+        let opacity = cardOpacities.indices.contains(index) ? cardOpacities[index] : 1
+        let offset = cardOffsets.indices.contains(index) ? cardOffsets[index] : 0
 
-                VStack(alignment: .leading, spacing: 1) {
+        return Link(destination: p.platformURL ?? URL(string: "https://\(p.platform.lowercased())")!) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Color(hex: p.color).opacity(0.15)).frame(width: 44, height: 44)
+                    Image(systemName: sfIcon(p.platform))
+                        .foregroundColor(Color(hex: p.color)).font(.footnote)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(p.platform).font(.subheadline.weight(.semibold)).foregroundColor(.white)
-                    if let u = p.username { Text(u).font(.caption).foregroundColor(.white.opacity(0.4)) }
-                    else { Text("Profile found").font(.caption).foregroundColor(.white.opacity(0.3)) }
+                    if let u = p.username {
+                        Text(u).font(.caption).foregroundColor(.white.opacity(0.45))
+                    } else {
+                        Text("Profile").font(.caption).foregroundColor(.white.opacity(0.3))
+                    }
                 }
 
                 Spacer()
@@ -116,11 +151,12 @@ struct ResultsView: View {
 
                 Image(systemName: "chevron.right").font(.caption).foregroundColor(.white.opacity(0.2))
             }
-            .padding(12).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+            .padding(14).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.06), lineWidth: 1))
+            .opacity(opacity).offset(y: offset)
         }
     }
 
-    // === CRIMINAL TAB ===
     private var criminalTab: some View {
         ScrollView {
             if result.criminalRecords.isEmpty {
@@ -132,15 +168,15 @@ struct ResultsView: View {
                             HStack(spacing: 10) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundColor(r.color).font(.title3)
-                                VStack(alignment: .leading, spacing: 1) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(r.type).font(.subheadline.weight(.semibold)).foregroundColor(.white)
-                                    Text(r.source).font(.caption).foregroundColor(.white.opacity(0.4))
+                                    Text(r.source).font(.caption).foregroundColor(.white.opacity(0.45))
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.right").font(.caption).foregroundColor(.white.opacity(0.2))
                             }
-                            .padding(12).background(r.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(r.color.opacity(0.2), lineWidth: 0.5))
+                            .padding(14).background(r.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(r.color.opacity(0.2), lineWidth: 0.5))
                         }
                     }
                 }
@@ -149,7 +185,6 @@ struct ResultsView: View {
         }
     }
 
-    // === WEB TAB ===
     private var webTab: some View {
         ScrollView {
             if result.otherMatches.isEmpty {
@@ -181,6 +216,18 @@ struct ResultsView: View {
         }
     }
 
+    private func animateCards() {
+        let count = result.socialProfiles.count + result.criminalRecords.count + result.otherMatches.count
+        cardOffsets = Array(repeating: 30, count: count)
+        cardOpacities = Array(repeating: 0, count: count)
+        for i in 0..<count {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8).delay(Double(i) * 0.04)) {
+                if cardOffsets.indices.contains(i) { cardOffsets[i] = 0 }
+                if cardOpacities.indices.contains(i) { cardOpacities[i] = 1 }
+            }
+        }
+    }
+
     private func sfIcon(_ platform: String) -> String {
         let p = platform.lowercased()
         if p.contains("instagram") { return "camera.viewfinder" }
@@ -207,20 +254,9 @@ extension Color {
     init(hex: String) {
         let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         if let i = Int(h, radix: 16) {
-            self.init(
-                red: Double((i >> 16) & 0xFF) / 255,
-                green: Double((i >> 8) & 0xFF) / 255,
-                blue: Double(i & 0xFF) / 255
-            )
+            self.init(red: Double((i >> 16) & 0xFF) / 255,
+                      green: Double((i >> 8) & 0xFF) / 255,
+                      blue: Double(i & 0xFF) / 255)
         } else { self = .gray }
     }
-}
-
-#Preview {
-    ResultsView(result: SearchResponse(
-        success: true, totalMatches: 10,
-        socialProfiles: [SocialProfile(platform: "Instagram", icon: "camera.viewfinder", color: "#E4405F", url: "https://instagram.com/user", username: "@user", confidence: 91)],
-        criminalRecords: [CriminalRecord(source: "Mugshots.com", type: "Mugshot", url: "https://mugshots.com/123", confidence: 55)],
-        otherMatches: [OtherMatch(url: "https://example.com", confidence: 40)]
-    ), onReset: {})
 }

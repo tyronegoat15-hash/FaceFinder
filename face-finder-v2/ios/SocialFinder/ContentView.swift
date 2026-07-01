@@ -11,27 +11,24 @@ struct ContentView: View {
     @State private var showPicker = false
     @State private var showSettings = false
     @State private var showResults = false
-    @State private var cameraAvailable = UIImagePickerController.isSourceTypeAvailable(.camera)
+    @State private var pulse = false
+    @State private var scanPhase: CGFloat = -0.5
+    @State private var particles: [Particle] = []
 
     var body: some View {
         ZStack {
             bgGradient.ignoresSafeArea()
-
+            if isSearching { scanningOverlay }
             VStack(spacing: 0) {
                 header
                 Spacer()
                 if let img = selectedImage { imagePreview(img) }
                 else { emptyState }
                 Spacer()
-                if isSearching { loadingState }
-                bottomBar
-                    .padding(.bottom, 35)
+                bottomBar.padding(.bottom, 35)
             }
         }
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraView(image: $selectedImage)
-                .ignoresSafeArea()
-        }
+        .fullScreenCover(isPresented: $showCamera) { CameraView(image: $selectedImage) }
         .sheet(isPresented: $showPicker) { ImagePicker(image: $selectedImage) }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .fullScreenCover(isPresented: $showResults) {
@@ -40,25 +37,62 @@ struct ContentView: View {
         .alert("Error", isPresented: $showError) {
             Button("OK") {}
         } message: { Text(errorMsg ?? "Unknown error") }
-        .onAppear { checkBackend() }
+        .onAppear { checkBackend(); generateParticles() }
     }
 
     private var bgGradient: some View {
-        LinearGradient(colors: [
-            Color(red: 0.05, green: 0.02, blue: 0.15),
-            Color(red: 0.15, green: 0.02, blue: 0.25),
-            Color(red: 0.02, green: 0.06, blue: 0.18),
-        ], startPoint: .topLeading, endPoint: .bottomTrailing)
+        ZStack {
+            LinearGradient(colors: [
+                Color(red: 0.05, green: 0.02, blue: 0.15),
+                Color(red: 0.15, green: 0.02, blue: 0.25),
+                Color(red: 0.02, green: 0.06, blue: 0.18),
+            ], startPoint: .topLeading, endPoint: .bottomTrailing)
+
+            ForEach(particles) { p in
+                Circle().fill(p.color.opacity(0.15))
+                    .frame(width: p.size, height: p.size)
+                    .position(p.position)
+                    .animation(.easeInOut(duration: p.duration).repeatForever(autoreverses: true), value: pulse)
+            }
+        }
+    }
+
+    private var scanningOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                ZStack {
+                    Circle().stroke(.purple.opacity(0.3), lineWidth: 2).frame(width: 160, height: 160)
+                    Circle().stroke(.purple.opacity(0.5), lineWidth: 2).frame(width: 120, height: 120)
+                    Circle().stroke(.purple.opacity(0.7), lineWidth: 2).frame(width: 80, height: 80)
+                    Circle().fill(.purple.opacity(0.15)).frame(width: 40, height: 40)
+                        .overlay(Image(systemName: "faceid").font(.title2).foregroundColor(.white))
+
+                    RadarArc()
+                        .stroke(LinearGradient(colors: [.clear, .purple, .blue], startPoint: .leading, endPoint: .trailing),
+                                style: StrokeStyle(lineWidth: 3, dash: [4, 12]))
+                        .frame(width: 180, height: 180)
+                        .rotationEffect(.degrees(Double(scanPhase * 360)))
+                        .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: scanPhase)
+                }
+
+                VStack(spacing: 6) {
+                    Text("Scanning the web...").font(.title3.weight(.bold)).foregroundColor(.white)
+                    Text("Yandex + Google + Criminal databases")
+                        .font(.caption).foregroundColor(.white.opacity(0.4))
+                }
+            }
+        }
+        .onAppear { scanPhase = 1 }
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("FaceFinder")
-                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                Text("FaceFinder").font(.system(size: 32, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
-                Text("Instant OSINT by face")
-                    .font(.caption).foregroundColor(.white.opacity(0.4))
+                Text("Instant OSINT by face").font(.caption).foregroundColor(.white.opacity(0.4))
             }
             Spacer()
             HStack(spacing: 12) {
@@ -71,9 +105,7 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 56)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 20).padding(.top, 56).padding(.bottom, 8)
     }
 
     private var indicator: some View {
@@ -86,8 +118,7 @@ struct ContentView: View {
             Spacer()
             Image(systemName: "face.dashed").font(.system(size: 70))
                 .foregroundColor(.white.opacity(0.15))
-            Text("Take or choose a photo")
-                .font(.title2.weight(.bold)).foregroundColor(.white)
+            Text("Take or choose a photo").font(.title2.weight(.bold)).foregroundColor(.white)
             Text("Find social media, criminal records,\nand web presence from any face")
                 .font(.subheadline).foregroundColor(.white.opacity(0.4))
                 .multilineTextAlignment(.center)
@@ -107,21 +138,9 @@ struct ContentView: View {
         }
     }
 
-    private var loadingState: some View {
-        VStack(spacing: 14) {
-            ProgressView().scaleEffect(1.6).tint(.white)
-            Text("Searching the web...").font(.headline).foregroundColor(.white.opacity(0.6))
-            Text("Yandex + Google + Criminal databases")
-                .font(.caption2).foregroundColor(.white.opacity(0.3))
-        }
-        .padding(.bottom, 10)
-    }
-
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            if cameraAvailable {
-                btn("camera.fill", "Camera", .blue) { showCamera = true }
-            }
+            btn("camera.fill", "Camera", .blue) { showCamera = true }
             btn("photo.on.rectangle", "Gallery", .purple) { showPicker = true }
             if selectedImage != nil && !isSearching {
                 btn("magnifyingglass", "Search", .green) { search() }
@@ -163,6 +182,33 @@ struct ContentView: View {
             if !ok { errorMsg = "Can't reach server at\n\(service.serverURL)\n\nTap settings to configure"; showError = true }
         }
     }
+
+    private func generateParticles() {
+        for _ in 0..<15 {
+            particles.append(Particle(
+                position: CGPoint(x: CGFloat.random(in: 0...400), y: CGFloat.random(in: 0...800)),
+                color: [Color.purple, .blue, .pink, .indigo].randomElement()!,
+                size: CGFloat.random(in: 2...6),
+                duration: Double.random(in: 3...7)
+            ))
+        }
+        DispatchQueue.main.async { withAnimation(.easeInOut(duration: 2).repeatForever()) { pulse.toggle() } }
+    }
 }
 
-#Preview { ContentView() }
+struct Particle: Identifiable {
+    let id = UUID()
+    let position: CGPoint
+    let color: Color
+    let size: CGFloat
+    let duration: Double
+}
+
+struct RadarArc: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: rect.width / 2,
+                 startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+        return p
+    }
+}

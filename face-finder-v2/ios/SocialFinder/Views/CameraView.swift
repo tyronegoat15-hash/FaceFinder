@@ -1,34 +1,90 @@
 import SwiftUI
 import AVFoundation
 
-struct CameraView: UIViewControllerRepresentable {
+struct CameraView: View {
     @Binding var image: UIImage?
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var model = CameraModel()
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.cameraCaptureMode = .photo
-        picker.delegate = context.coordinator
-        picker.modalPresentationStyle = .fullScreen
-        return picker
+    var body: some View {
+        ZStack {
+            CameraPreview(model: model)
+                .ignoresSafeArea()
+
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.title3.weight(.bold))
+                            .foregroundColor(.white).padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    Spacer()
+                }
+                .padding(.top, 56).padding(.leading, 20)
+
+                Spacer()
+
+                Button {
+                    model.capture { img in
+                        image = img
+                        dismiss()
+                    }
+                } label: {
+                    Circle().strokeBorder(.white, lineWidth: 4).frame(width: 72, height: 72)
+                        .overlay(Circle().fill(.white).frame(width: 60, height: 60))
+                }
+                .padding(.bottom, 50)
+            }
+        }
+        .onAppear { model.start() }
+        .onDisappear { model.stop() }
+    }
+}
+
+class CameraModel: NSObject, ObservableObject {
+    let session = AVCaptureSession()
+    private let output = AVCapturePhotoOutput()
+    private var handler: ((UIImage?) -> Void)?
+
+    func start() {
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        session.beginConfiguration()
+        if session.canAddInput(input) { session.addInput(input) }
+        if session.canAddOutput(output) { session.addOutput(output) }
+        session.commitConfiguration()
+        DispatchQueue.global(qos: .userInitiated).async { self.session.startRunning() }
     }
 
-    func updateUIViewController(_: UIImagePickerController, context: Context) {}
+    func stop() { session.stopRunning() }
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func capture(_ completion: @escaping (UIImage?) -> Void) {
+        handler = completion
+        let settings = AVCapturePhotoSettings()
+        output.capturePhoto(with: settings, delegate: self)
+    }
+}
 
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraView
-        init(_ p: CameraView) { parent = p }
+extension CameraModel: AVCapturePhotoCaptureDelegate {
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard let data = photo.fileDataRepresentation(),
+              let img = UIImage(data: data) else { handler?(nil); return }
+        handler?(img)
+    }
+}
 
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let img = info[.originalImage] as? UIImage { parent.image = img }
-            parent.dismiss()
-        }
+struct CameraPreview: UIViewRepresentable {
+    @ObservedObject var model: CameraModel
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
-        }
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        let layer = AVCaptureVideoPreviewLayer(session: model.session)
+        layer.videoGravity = .resizeAspectFill
+        view.layer.addSublayer(layer)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        (uiView.layer.sublayers?.first as? AVCaptureVideoPreviewLayer)?.frame = uiView.bounds
     }
 }
