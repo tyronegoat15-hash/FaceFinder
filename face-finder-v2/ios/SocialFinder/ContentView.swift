@@ -28,7 +28,7 @@ struct ContentView: View {
                 bottomBar.padding(.bottom, 35)
             }
         }
-        .fullScreenCover(isPresented: $showCamera) { CameraView(image: $selectedImage) }
+        .sheet(isPresented: $showCamera) { CameraView(image: $selectedImage) }
         .sheet(isPresented: $showPicker) { ImagePicker(image: $selectedImage) }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .fullScreenCover(isPresented: $showResults) {
