@@ -4,6 +4,7 @@ const axios = require("axios");
 const FormData = require("form-data");
 const cheerio = require("cheerio");
 const fs = require("fs");
+const path = require("path");
 const cors = require("cors");
 require("dotenv").config();
 
@@ -17,7 +18,6 @@ const SOCIAL_DOMAINS = {
   "instagram.com": { name: "Instagram", icon: "camera.viewfinder", color: "#E4405F" },
   "tiktok.com": { name: "TikTok", icon: "music.note", color: "#000000" },
   "facebook.com": { name: "Facebook", icon: "f.square", color: "#1877F2" },
-  "fb.com": { name: "Facebook", icon: "f.square", color: "#1877F2" },
   "twitter.com": { name: "Twitter / X", icon: "bird", color: "#1DA1F2" },
   "x.com": { name: "X (Twitter)", icon: "xmark", color: "#000000" },
   "snapchat.com": { name: "Snapchat", icon: "ghost", color: "#FFFC00" },
@@ -28,13 +28,10 @@ const SOCIAL_DOMAINS = {
   "onlyfans.com": { name: "OnlyFans", icon: "lock", color: "#00AFF0" },
   "github.com": { name: "GitHub", icon: "chevron.left.forwardslash.chevron.right", color: "#333" },
   "discord.com": { name: "Discord", icon: "bubble.left.and.bubble.right", color: "#5865F2" },
-  "discord.gg": { name: "Discord", icon: "bubble.left.and.bubble.right", color: "#5865F2" },
   "telegram.org": { name: "Telegram", icon: "paperplane", color: "#26A5E4" },
-  "t.me": { name: "Telegram", icon: "paperplane", color: "#26A5E4" },
   "twitch.tv": { name: "Twitch", icon: "tv", color: "#9146FF" },
   "patreon.com": { name: "Patreon", icon: "heart", color: "#FF424D" },
   "threads.net": { name: "Threads", icon: "at", color: "#000000" },
-  "whatsapp.com": { name: "WhatsApp", icon: "message", color: "#25D366" },
   "tinder.com": { name: "Tinder", icon: "flame", color: "#FF6B6B" },
   "bumble.com": { name: "Bumble", icon: "circle.hexagongrid", color: "#FFC000" },
   "hinge.co": { name: "Hinge", icon: "heart.circle", color: "#FF4B4B" },
@@ -45,8 +42,6 @@ const SOCIAL_DOMAINS = {
   "behance.net": { name: "Behance", icon: "square.grid.3x3", color: "#1769FF" },
   "dribbble.com": { name: "Dribbble", icon: "circle.dotted", color: "#EA4C89" },
   "vk.com": { name: "VK", icon: "v.circle", color: "#4C75A3" },
-  "weibo.com": { name: "Weibo", icon: "w.circle", color: "#E6162D" },
-  "xiaohongshu.com": { name: "Xiaohongshu", icon: "book", color: "#FF2442" },
 };
 
 const USER_AGENTS = [
@@ -56,7 +51,6 @@ const USER_AGENTS = [
 ];
 
 function randomUA() { return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]; }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function extractUsername(url) {
   try {
@@ -104,18 +98,70 @@ function classifySocialProfiles(urls) {
   return profiles;
 }
 
+// === NAME-BASED SOCIAL SEARCH (primary method) ===
+async function searchSocialByName(name) {
+  if (!name || name.length < 2) return [];
+  const results = []; const seen = new Set();
+  const socialSites = [
+    "instagram.com", "facebook.com", "twitter.com", "tiktok.com", "linkedin.com",
+    "youtube.com", "reddit.com", "github.com", "pinterest.com", "twitch.tv",
+    "snapchat.com", "onlyfans.com", "patreon.com", "tumblr.com", "flickr.com",
+    "medium.com", "behance.net", "dribbble.com", "threads.net", "discord.com",
+  ];
+
+  // Search each social site with the name
+  const queries = socialSites.map(site => `${name} site:${site}`);
+  // Limit to first 5 sites to avoid rate limiting
+  const batch = queries.slice(0, 5);
+
+  for (const q of batch) {
+    try {
+      const encoded = encodeURIComponent(q);
+      const res = await axios.get(`https://www.google.com/search?q=${encoded}&hl=en&num=5`, {
+        headers: { "User-Agent": randomUA(), "Accept-Language": "en-US,en;q=0.9" },
+        timeout: 8000,
+      });
+      const $ = cheerio.load(res.data);
+      $("a[href]").each((_, el) => {
+        let href = $(el).attr("href") || "";
+        if (href.startsWith("/url?q=")) href = decodeURIComponent(href.replace("/url?q=", "").split("&")[0]);
+        if (href.startsWith("http") && !href.includes("google.com") && !seen.has(href)) {
+          const matched = Object.keys(SOCIAL_DOMAINS).find(d => href.toLowerCase().includes(d));
+          if (matched) {
+            seen.add(href);
+            const isSocial = socialSites.some(s => href.includes(s));
+            results.push({ url: href, confidence: isSocial ? 75 : 50 });
+          }
+        }
+      });
+      await new Promise(r => setTimeout(r, 500)); // rate limiting
+    } catch {}
+  }
+  return results;
+}
+
+// === GENERATE NAME VARIANTS FROM IMAGE FILENAME ===
+function generateNamesFromFile(imagePath) {
+  const base = path.basename(imagePath, path.extname(imagePath));
+  // Try to split on common separators
+  const parts = base.split(/[_\-.\s]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    // Could be firstname_lastname
+    return [parts.join(" "), parts.join(""), parts[0]];
+  }
+  return [base];
+}
+
 // === YANDEX REVERSE IMAGE SEARCH ===
 async function searchYandex(imagePath) {
   try {
     const form = new FormData();
     form.append("upfile", fs.createReadStream(imagePath), { filename: "photo.jpg", contentType: "image/jpeg" });
     form.append("rpt", "imageview");
-
     const res = await axios.post("https://yandex.com/images/search", form, {
       headers: { "User-Agent": randomUA(), Accept: "text/html", ...form.getHeaders() },
       maxRedirects: 5, timeout: 15000,
     });
-
     const $ = cheerio.load(res.data);
     const results = []; const urls = new Set();
     $("a[href]").each((_, el) => {
@@ -125,12 +171,6 @@ async function searchYandex(imagePath) {
         urls.add(href); results.push({ url: href, confidence: 55 });
       }
     });
-
-    const scripts = $("script").text();
-    const found = scripts.match(/https?:\/\/[^\s"'<>]+/g) || [];
-    for (const u of found) {
-      if (!urls.has(u)) { urls.add(u); results.push({ url: u, confidence: 45 }); }
-    }
     return results;
   } catch (err) { console.error("Yandex error:", err.message); return []; }
 }
@@ -141,12 +181,10 @@ async function searchGoogle(imagePath) {
     const form = new FormData();
     form.append("encoded_image", fs.createReadStream(imagePath), { filename: "photo.jpg", contentType: "image/jpeg" });
     form.append("image_content", ""); form.append("filename", "photo.jpg");
-
     const res = await axios.post("https://www.google.com/searchbyimage/upload", form, {
       headers: { "User-Agent": randomUA(), Accept: "text/html", ...form.getHeaders() },
       maxRedirects: 0, validateStatus: s => s < 400 || s === 302, timeout: 20000,
     });
-
     const $ = cheerio.load(res.data); const results = []; const urls = new Set();
     $("a[href]").each((_, el) => {
       let href = $(el).attr("href") || "";
@@ -155,42 +193,33 @@ async function searchGoogle(imagePath) {
         urls.add(href); results.push({ url: href, confidence: 50 });
       }
     });
-
-    const scripts = $("script").text();
-    const found = scripts.match(/"https?:\/\/[^"]+"/g) || [];
-    for (const m of found) {
-      const u = m.replace(/"/g, "");
-      if (!urls.has(u) && !u.includes("google") && !u.includes("gstatic")) {
-        urls.add(u); results.push({ url: u, confidence: 40 });
-      }
-    }
     return results;
   } catch (err) { console.error("Google error:", err.message); return []; }
 }
 
-// === BING VISUAL SEARCH ===
-async function searchBing(imagePath) {
-  const apiKey = process.env.BING_API_KEY;
-  if (!apiKey) return [];
-  try {
-    const buf = fs.readFileSync(imagePath);
-    const res = await axios.post("https://api.bing.microsoft.com/v7.0/images/visualSearch", buf, {
-      headers: { "Ocp-Apim-Subscription-Key": apiKey, "Content-Type": "multipart/form-data" },
-      params: { mkt: "en-US", safeSearch: "Off" }, timeout: 15000,
-    });
-
-    const results = []; const urls = new Set();
-    for (const tag of res.data.tags || []) {
-      for (const action of tag.actions || []) {
-        for (const v of action.data?.value || []) {
-          if (v.hostPageUrl && !urls.has(v.hostPageUrl)) {
-            urls.add(v.hostPageUrl); results.push({ url: v.hostPageUrl, confidence: Math.round((tag.confidence || 0.5) * 100) });
-          }
-        }
-      }
+// === GOOGLE SEARCH FOR ANY NAME HINTS FROM IMAGE SEARCH ===
+async function findNamesFromImageUrls(urls) {
+  const names = new Set();
+  for (const item of urls.slice(0, 10)) {
+    const title = item.url.split("/").pop()?.replace(/[-_]/g, " ") || "";
+    if (title.length > 3 && title.length < 40 && !title.match(/^\d+$/)) {
+      names.add(title.trim());
     }
-    return results;
-  } catch (err) { console.error("Bing error:", err.message); return []; }
+  }
+  // Search Google for the first URL's page title
+  if (urls.length > 0) {
+    try {
+      const res = await axios.get(urls[0].url, { headers: { "User-Agent": randomUA() }, timeout: 5000 });
+      const $ = cheerio.load(res.data);
+      const title = $("title").text().trim();
+      if (title && title.length > 3 && title.length < 60) {
+        // Remove site name from title
+        const clean = title.replace(/ - .*$/, "").replace(/ \| .*$/, "").trim();
+        if (clean.length > 3) names.add(clean);
+      }
+    } catch {}
+  }
+  return [...names];
 }
 
 // === CRIMINAL RECORDS SEARCH ===
@@ -204,18 +233,17 @@ const CRIMINAL_SITES = [
   { name: "JailBase", domain: "jailbase.com", type: "Arrest Record" },
 ];
 
-async function searchCriminalRecords(name, urls) {
+async function searchCriminalRecords(name, existingUrls) {
   if (!name || name.length < 2) return [];
   const results = []; const seen = new Set();
 
   for (const site of CRIMINAL_SITES) {
-    if (urls.some(u => u.toLowerCase().includes(site.domain))) {
-      const url = urls.find(u => u.toLowerCase().includes(site.domain));
+    if (existingUrls.some(u => u.toLowerCase().includes(site.domain))) {
+      const url = existingUrls.find(u => u.toLowerCase().includes(site.domain));
       if (url && !seen.has(url)) { seen.add(url); results.push({ source: site.name, type: site.type, url, confidence: 60 }); }
     }
   }
 
-  // Search Google for name + arrest/mugshot
   try {
     const q = encodeURIComponent(`${name} arrested mugshot inmate`);
     const res = await axios.get(`https://www.google.com/search?q=${q}&hl=en`, {
@@ -245,12 +273,11 @@ app.post("/api/search", upload.single("image"), async (req, res) => {
   if (!imagePath) return res.status(400).json({ error: "No image provided" });
 
   try {
-    const [yandex, google, bing] = await Promise.all([
-      searchYandex(imagePath), searchGoogle(imagePath), searchBing(imagePath),
+    // Phase 1: Reverse image search (Yandex + Google)
+    const [yandex, google] = await Promise.all([
+      searchYandex(imagePath), searchGoogle(imagePath),
     ]);
-    try { fs.unlinkSync(imagePath); } catch {}
-
-    const allUrls = [...yandex, ...google, ...bing];
+    let allUrls = [...yandex, ...google];
     const seen = new Set();
     const merged = [];
     for (const item of allUrls) {
@@ -258,22 +285,42 @@ app.post("/api/search", upload.single("image"), async (req, res) => {
       if (!seen.has(norm)) { seen.add(norm); merged.push(item); }
     }
 
-    const socialProfiles = classifySocialProfiles(merged);
-    const otherUrls = merged.filter(m => !Object.keys(SOCIAL_DOMAINS).some(d => m.url.toLowerCase().includes(d))).slice(0, 40);
+    // Phase 2: Try to extract names from image search results
+    let names = await findNamesFromImageUrls(merged);
 
-    // Extract potential names for criminal search
-    let names = [];
+    // Phase 3: Search social media by name (primary method for real results)
+    let nameBasedMatches = [];
+    for (const name of names.slice(0, 3)) {
+      const matches = await searchSocialByName(name);
+      nameBasedMatches.push(...matches);
+    }
+
+    // Merge all results
+    for (const item of nameBasedMatches) {
+      const norm = item.url.replace(/\/$/, "").toLowerCase();
+      if (!seen.has(norm)) { seen.add(norm); merged.push(item); }
+    }
+
+    const socialProfiles = classifySocialProfiles(merged);
+    const otherUrls = merged.filter(m =>
+      !Object.keys(SOCIAL_DOMAINS).some(d => m.url.toLowerCase().includes(d))
+    ).slice(0, 40);
+
+    // Extract names for criminal search
+    let nameList = [];
     for (const p of socialProfiles) {
       const n = extractNameFromUrl(p.url);
-      if (n && !names.includes(n.toLowerCase())) names.push(n);
+      if (n && !nameList.includes(n.toLowerCase())) nameList.push(n);
     }
-    const nameToSearch = names.length > 0 ? names[0] : null;
+    if (nameList.length === 0 && names.length > 0) nameList = names;
 
     let criminalRecords = [];
-    if (nameToSearch) {
+    if (nameList.length > 0) {
       const allSourceUrls = merged.map(m => m.url);
-      criminalRecords = await searchCriminalRecords(nameToSearch, allSourceUrls);
+      criminalRecords = await searchCriminalRecords(nameList[0], allSourceUrls);
     }
+
+    try { fs.unlinkSync(imagePath); } catch {}
 
     res.json({
       success: true,
@@ -291,15 +338,16 @@ app.post("/api/search", upload.single("image"), async (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "2.0",
-    engines: { yandex: true, google: true, bing: !!process.env.BING_API_KEY },
+    version: "3.0",
+    engines: { yandex: true, google: true, nameSearch: true },
     criminalSearch: true,
   });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`\n  FaceFinder API v2 running on port ${PORT}`);
-  console.log(`  Yandex=OK  Google=OK  Bing=${process.env.BING_API_KEY ? "OK" : "OFF"}`);
+  console.log(`\n  FaceFinder API v3 running on port ${PORT}`);
+  console.log(`  Reverse image: Yandex=OK  Google=OK`);
+  console.log(`  Name-based social search: ENABLED`);
   console.log(`  Criminal records search: ENABLED\n`);
 });
